@@ -13,6 +13,7 @@ GOENV := off
 GOFLAGS := -modcacherw
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
+GO_SOURCES := $(wildcard *.go)
 
 export GOCACHE
 export GOMODCACHE
@@ -36,25 +37,25 @@ release: \
 	$(RELEASE_DIR)/$(APP)-static-linux-aarch64 \
 	$(RELEASE_DIR)/$(APP)-static-linux-x86_64
 
-$(HOST_BIN_DIR)/$(APP): go.mod main.go
+$(HOST_BIN_DIR)/$(APP): go.mod $(GO_SOURCES)
 	mkdir -p "$(HOST_BIN_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
 	rm -f "$(BIN_DIR)/$(APP)"
 	go build -o "$(HOST_BIN_DIR)/$(APP)" .
 
-$(HOST_BIN_DIR)/$(STATIC_APP): go.mod main.go
+$(HOST_BIN_DIR)/$(STATIC_APP): go.mod $(GO_SOURCES)
 	mkdir -p "$(HOST_BIN_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
 	rm -f "$(BIN_DIR)/$(STATIC_APP)"
 	CGO_ENABLED=0 GOOS="$(GOOS)" GOARCH="$(GOARCH)" go build -trimpath -ldflags='-s -w' -o "$(HOST_BIN_DIR)/$(STATIC_APP)" .
 
-$(RELEASE_DIR)/$(APP)-static-darwin-aarch64: go.mod main.go
+$(RELEASE_DIR)/$(APP)-static-darwin-aarch64: go.mod $(GO_SOURCES)
 	mkdir -p "$(RELEASE_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o "$@" .
 
-$(RELEASE_DIR)/$(APP)-static-linux-aarch64: go.mod main.go
+$(RELEASE_DIR)/$(APP)-static-linux-aarch64: go.mod $(GO_SOURCES)
 	mkdir -p "$(RELEASE_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o "$@" .
 
-$(RELEASE_DIR)/$(APP)-static-linux-x86_64: go.mod main.go
+$(RELEASE_DIR)/$(APP)-static-linux-x86_64: go.mod $(GO_SOURCES)
 	mkdir -p "$(RELEASE_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$@" .
 
