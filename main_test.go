@@ -2,10 +2,30 @@ package main
 
 import (
 	"context"
+	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "tcp" }
+func (a fakeAddr) String() string  { return string(a) }
+
+type fakeConn struct {
+	closed atomic.Int32
+}
+
+func (c *fakeConn) Read([]byte) (int, error)         { return 0, nil }
+func (c *fakeConn) Write(p []byte) (int, error)      { return len(p), nil }
+func (c *fakeConn) Close() error                     { c.closed.Add(1); return nil }
+func (c *fakeConn) LocalAddr() net.Addr              { return fakeAddr("local") }
+func (c *fakeConn) RemoteAddr() net.Addr             { return fakeAddr("remote") }
+func (c *fakeConn) SetDeadline(time.Time) error      { return nil }
+func (c *fakeConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *fakeConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestParseTargets(t *testing.T) {
 	targets, err := parseTargets("192.168.1.10:22, example.local:2222,192.168.1.10:22")
@@ -58,6 +78,7 @@ func TestFirstReachablePrefersConfiguredOrder(t *testing.T) {
 func TestParseConfigAcceptsSelectionIntervalShorterThanTimeout(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"--targets", "example.local:22",
+		"--fdpass",
 		"--selection-interval", "1s",
 		"--connect-timeout", "10s",
 	})
@@ -71,6 +92,10 @@ func TestParseConfigAcceptsSelectionIntervalShorterThanTimeout(t *testing.T) {
 
 	if cfg.connectTimeout != 10*time.Second {
 		t.Fatalf("unexpected connect timeout: %v", cfg.connectTimeout)
+	}
+
+	if !cfg.fdpass {
+		t.Fatal("expected fdpass to be enabled")
 	}
 }
 
@@ -106,8 +131,8 @@ func TestWaitForTargetContinuesPastFirstSelectionInterval(t *testing.T) {
 		t.Fatalf("waitForTarget returned error: %v", err)
 	}
 
-	if selected.raw != "later:22" {
-		t.Fatalf("expected later:22, got %q", selected.raw)
+	if selected.target.raw != "later:22" {
+		t.Fatalf("expected later:22, got %q", selected.target.raw)
 	}
 
 	if elapsed < 20*time.Millisecond {
@@ -149,8 +174,8 @@ func TestWaitForTargetPrefersConfiguredOrderAmongSuccessfulTargets(t *testing.T)
 		t.Fatalf("waitForTarget returned error: %v", err)
 	}
 
-	if selected.raw != "preferred:22" {
-		t.Fatalf("expected preferred:22, got %q", selected.raw)
+	if selected.target.raw != "preferred:22" {
+		t.Fatalf("expected preferred:22, got %q", selected.target.raw)
 	}
 }
 
@@ -216,8 +241,8 @@ func TestWaitForTargetCancelsLosingProbeAfterSelection(t *testing.T) {
 		t.Fatalf("waitForTarget returned error: %v", err)
 	}
 
-	if selected.raw != "winner:22" {
-		t.Fatalf("expected winner:22, got %q", selected.raw)
+	if selected.target.raw != "winner:22" {
+		t.Fatalf("expected winner:22, got %q", selected.target.raw)
 	}
 
 	select {
@@ -259,4 +284,60 @@ func TestWaitForTargetHonorsHardConnectTimeout(t *testing.T) {
 	if elapsed > 100*time.Millisecond {
 		t.Fatalf("expected hard timeout near 40ms, got %v", elapsed)
 	}
+}
+
+func TestWaitForTargetReturnsWinningLiveConnAndClosesLosingSuccessConn(t *testing.T) {
+	origProbeFunc := probeFunc
+	t.Cleanup(func() {
+		probeFunc = origProbeFunc
+	})
+
+	winnerConn := &fakeConn{}
+	loserConn := &fakeConn{}
+
+	probeFunc = func(ctx context.Context, t target, _ time.Duration) probeResult {
+		switch t.raw {
+		case "winner:22":
+			time.Sleep(15 * time.Millisecond)
+			return probeResult{target: t, conn: winnerConn, up: true, at: time.Now()}
+		case "loser:22":
+			time.Sleep(5 * time.Millisecond)
+			return probeResult{target: t, conn: loserConn, up: true, at: time.Now()}
+		default:
+			<-ctx.Done()
+			return probeResult{target: t, up: false, err: ctx.Err(), at: time.Now()}
+		}
+	}
+
+	cfg := config{
+		targets: []target{
+			{raw: "winner:22"},
+			{raw: "loser:22"},
+		},
+		selectionInterval: 20 * time.Millisecond,
+		connectTimeout:    100 * time.Millisecond,
+	}
+
+	selected, _, err := waitForTarget(cfg)
+	if err != nil {
+		t.Fatalf("waitForTarget returned error: %v", err)
+	}
+
+	if selected.target.raw != "winner:22" {
+		t.Fatalf("expected winner:22, got %q", selected.target.raw)
+	}
+
+	if selected.conn != winnerConn {
+		t.Fatal("expected selected live connection to be returned")
+	}
+
+	if winnerConn.closed.Load() != 0 {
+		t.Fatal("expected winning connection to remain open")
+	}
+
+	if loserConn.closed.Load() == 0 {
+		t.Fatal("expected losing successful connection to be closed")
+	}
+
+	closeConn(selected.conn)
 }

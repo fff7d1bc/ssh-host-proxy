@@ -34,9 +34,25 @@ The proxy then:
 4. if multiple targets have responded, picks the first one in the order you provided
 5. if all probe attempts finish before the next selection check, it picks immediately and does not wait for the interval
 6. once a target is picked, the remaining in-flight probe attempts are canceled
-7. exits with error if no target responds
+7. in normal mode, it reuses that already-connected socket for the SSH session instead of dialing again
+8. exits with error if no target responds
 
 In normal mode it proxies stdin/stdout to the selected host, which makes it suitable for OpenSSH `ProxyCommand`.
+
+## Runtime Modes
+
+There are two ways to use `ssh-host-proxy` with OpenSSH:
+
+1. normal proxy mode
+2. file descriptor passing mode with `--fdpass`
+
+Normal proxy mode is the compatibility path. It still reuses the already-connected winning socket, but `ssh-host-proxy` remains in the data path for the lifetime of the SSH session and relays bytes between `ssh` and the remote socket.
+
+`--fdpass` should be preferred when your OpenSSH client supports `ProxyUseFdpass`. In that mode, `ssh-host-proxy` is only involved during connection establishment: it selects the best route, opens the winning connection, passes that connected socket to `ssh`, and exits. After that, the transfer path is native. There is no extra proxy process relaying traffic at runtime, so data transfer performance is effectively the same as if no proxy helper had been used at all.
+
+In practice that means the route-selection step may add a small amount of latency while the best path is chosen, but once the SSH connection is established, transfers run at native performance.
+
+Use the non-`fdpass` mode only when `ProxyUseFdpass` is not available, for example because the OpenSSH client is too old or the local platform does not support the required descriptor passing behavior.
 
 ## Example SSH Config
 
@@ -53,11 +69,23 @@ After that, from your client machine you just use:
 ssh user@EXAMPLE
 ```
 
+If your OpenSSH supports it, you can avoid keeping `ssh-host-proxy` in the transfer path entirely by using file descriptor passing:
+
+`~/.ssh/config`
+
+```
+Host EXAMPLE
+    ProxyCommand ssh-host-proxy --fdpass --targets 192.168.1.10:22,mybox.local:22,100.64.10.20:22
+    ProxyUseFdpass yes
+```
+
+With that configuration, `ssh-host-proxy` selects the route, passes the connected socket to `ssh`, and exits.
+
 ## Options
 
 ```
 Usage:
-  ssh-host-proxy --targets host1:22,host2:22,host3:22 [--selection-interval 1s] [--connect-timeout 10s] [--dry-run]
+  ssh-host-proxy --targets host1:22,host2:22,host3:22 [--selection-interval 1s] [--connect-timeout 10s] [--fdpass] [--dry-run]
 
 Options:
   --targets string
@@ -66,6 +94,8 @@ Options:
         How often to probe targets and re-evaluate which ones are reachable (default 1s)
   --connect-timeout duration
         Maximum total time to keep probing before giving up (default 10s)
+  --fdpass
+        Pass the connected socket to ssh instead of proxying traffic in-process
   --dry-run
         Print what would be selected and exit
   --help

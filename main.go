@@ -21,6 +21,7 @@ type target struct {
 
 type probeResult struct {
 	target target
+	conn   net.Conn
 	up     bool
 	err    error
 	at     time.Time
@@ -48,12 +49,22 @@ func main() {
 	}
 
 	if cfg.dryRun {
+		closeConn(selected.conn)
 		printDryRun(&selected, states)
 		return
 	}
 
-	if err := proxyTo(selected.raw, cfg.connectTimeout); err != nil {
-		fmt.Fprintf(os.Stderr, "error: proxy to %s failed: %v\n", selected.raw, err)
+	if cfg.fdpass {
+		if err := passConn(selected.conn); err != nil {
+			closeConn(selected.conn)
+			fmt.Fprintf(os.Stderr, "error: fdpass to %s failed: %v\n", selected.target.raw, err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if err := proxyConn(selected.conn); err != nil {
+		fmt.Fprintf(os.Stderr, "error: proxy to %s failed: %v\n", selected.target.raw, err)
 		os.Exit(1)
 	}
 }
@@ -62,6 +73,7 @@ type config struct {
 	targets           []target
 	selectionInterval time.Duration
 	connectTimeout    time.Duration
+	fdpass            bool
 	dryRun            bool
 }
 
@@ -75,6 +87,7 @@ func parseConfig(args []string) (config, error) {
 	fs.StringVar(&targetsArg, "targets", "", "Comma-separated host:port targets in priority order")
 	fs.DurationVar(&cfg.selectionInterval, "selection-interval", time.Second, "How often to probe targets and re-evaluate which ones are reachable")
 	fs.DurationVar(&cfg.connectTimeout, "connect-timeout", 10*time.Second, "Maximum total time to keep probing before giving up")
+	fs.BoolVar(&cfg.fdpass, "fdpass", false, "Pass the connected socket to ssh instead of proxying traffic in-process")
 	fs.BoolVar(&cfg.dryRun, "dry-run", false, "Print what would be selected and exit")
 	fs.BoolVar(&help, "help", false, "Print help and exit")
 	fs.BoolVar(&help, "h", false, "Print help and exit")
@@ -119,7 +132,7 @@ func parseConfig(args []string) (config, error) {
 
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  ssh-host-proxy --targets host1:22,host2:22,host3:22 [--selection-interval 1s] [--connect-timeout 10s] [--dry-run]")
+	fmt.Fprintln(w, "  ssh-host-proxy --targets host1:22,host2:22,host3:22 [--selection-interval 1s] [--connect-timeout 10s] [--fdpass] [--dry-run]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Options:")
 	fmt.Fprintln(w, "  --targets string")
@@ -128,6 +141,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "        How often to probe targets and re-evaluate which ones are reachable (default 1s)")
 	fmt.Fprintln(w, "  --connect-timeout duration")
 	fmt.Fprintln(w, "        Maximum total time to keep probing before giving up (default 10s)")
+	fmt.Fprintln(w, "  --fdpass")
+	fmt.Fprintln(w, "        Pass the connected socket to ssh instead of proxying traffic in-process")
 	fmt.Fprintln(w, "  --dry-run")
 	fmt.Fprintln(w, "        Print what would be selected and exit")
 	fmt.Fprintln(w, "  --help")
@@ -161,7 +176,7 @@ func parseTargets(value string) ([]target, error) {
 	return targets, nil
 }
 
-func waitForTarget(cfg config) (target, map[string]probeResult, error) {
+func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.connectTimeout)
 	defer cancel()
 
@@ -194,37 +209,46 @@ func waitForTarget(cfg config) (target, map[string]probeResult, error) {
 					if !ok {
 						if selected, ok := firstReachable(cfg.targets, states); ok {
 							cancel()
-							return selected, states, nil
+							closeUnusedConnections(states, selected.raw)
+							return states[selected.raw], states, nil
 						}
-						return target{}, states, errors.New("no reachable targets responded before --connect-timeout")
+						closeAllConnections(states)
+						return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 					}
 					prev, exists := states[res.target.raw]
 					if !exists || res.at.After(prev.at) || (res.at.Equal(prev.at) && res.up && !prev.up) {
+						closeConn(prev.conn)
 						states[res.target.raw] = res
 					}
 				default:
 					if selected, ok := firstReachable(cfg.targets, states); ok {
 						cancel()
-						return selected, states, nil
+						closeUnusedConnections(states, selected.raw)
+						return states[selected.raw], states, nil
 					}
-					return target{}, states, errors.New("no reachable targets responded before --connect-timeout")
+					closeAllConnections(states)
+					return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 				}
 			}
 		case <-ticker.C:
 			if selected, ok := firstReachable(cfg.targets, states); ok {
 				cancel()
-				return selected, states, nil
+				closeUnusedConnections(states, selected.raw)
+				return states[selected.raw], states, nil
 			}
 		case res, ok := <-results:
 			if !ok {
 				if selected, ok := firstReachable(cfg.targets, states); ok {
 					cancel()
-					return selected, states, nil
+					closeUnusedConnections(states, selected.raw)
+					return states[selected.raw], states, nil
 				}
-				return target{}, states, errors.New("no reachable targets responded before --connect-timeout")
+				closeAllConnections(states)
+				return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 			}
 			prev, exists := states[res.target.raw]
 			if !exists || res.at.After(prev.at) || (res.at.Equal(prev.at) && res.up && !prev.up) {
+				closeConn(prev.conn)
 				states[res.target.raw] = res
 			}
 		}
@@ -236,8 +260,7 @@ func probeOnce(ctx context.Context, t target, connectTimeout time.Duration) prob
 	dialer := net.Dialer{Timeout: connectTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", t.raw)
 	if err == nil {
-		_ = conn.Close()
-		return probeResult{target: t, up: true, at: time.Now()}
+		return probeResult{target: t, conn: conn, up: true, at: time.Now()}
 	}
 
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -257,15 +280,15 @@ func firstReachable(targets []target, states map[string]probeResult) (target, bo
 	for _, t := range targets {
 		state, ok := states[t.raw]
 		if ok && state.up {
-			return t, true
+			return state.target, true
 		}
 	}
 	return target{}, false
 }
 
-func printDryRun(selected *target, states map[string]probeResult) {
+func printDryRun(selected *probeResult, states map[string]probeResult) {
 	if selected != nil {
-		fmt.Fprintf(os.Stderr, "selected target: %s\n", selected.raw)
+		fmt.Fprintf(os.Stderr, "selected target: %s\n", selected.target.raw)
 	} else {
 		fmt.Fprintln(os.Stderr, "selected target: none")
 	}
@@ -301,12 +324,7 @@ func sortStates(states map[string]probeResult) []probeResult {
 	return results
 }
 
-func proxyTo(addr string, connectTimeout time.Duration) error {
-	dialer := net.Dialer{Timeout: connectTimeout}
-	conn, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		return err
-	}
+func proxyConn(conn net.Conn) error {
 	defer conn.Close()
 
 	copyErr := make(chan error, 2)
@@ -333,4 +351,25 @@ func proxyTo(addr string, connectTimeout time.Duration) error {
 	}
 
 	return firstErr
+}
+
+func closeUnusedConnections(states map[string]probeResult, selected string) {
+	for key, state := range states {
+		if key == selected {
+			continue
+		}
+		closeConn(state.conn)
+	}
+}
+
+func closeAllConnections(states map[string]probeResult) {
+	for _, state := range states {
+		closeConn(state.conn)
+	}
+}
+
+func closeConn(conn net.Conn) {
+	if conn != nil {
+		_ = conn.Close()
+	}
 }
