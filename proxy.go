@@ -15,6 +15,8 @@ func proxyConn(conn net.Conn) error {
 	go func() {
 		_, err := io.Copy(conn, os.Stdin)
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			// Half-close after stdin reaches EOF so the remote side can see end of
+			// input while we still keep reading its stdout/stderr stream.
 			_ = tcpConn.CloseWrite()
 		}
 		copyErr <- err

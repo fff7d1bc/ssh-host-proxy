@@ -16,12 +16,16 @@ type target struct {
 
 type probeResult struct {
 	target target
-	conn   net.Conn
-	up     bool
-	err    error
-	at     time.Time
+	// conn is kept open for the winning target so the real SSH session can
+	// reuse the already-established connection instead of dialing again.
+	conn net.Conn
+	up   bool
+	err  error
+	at   time.Time
 }
 
+// probeFunc is injectable for tests so selection behavior can be exercised
+// deterministically without real network timing.
 var probeFunc = probeOnce
 
 func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
@@ -51,12 +55,18 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Enforce a hard overall timeout: drain only results that are already
+			// available right now, then return. Waiting for every goroutine to
+			// unwind here would make the timeout effectively "connect-timeout plus
+			// cleanup time".
 			for {
 				select {
 				case res, ok := <-results:
 					if !ok {
 						if selected, ok := firstReachable(cfg.targets, states); ok {
 							cancel()
+							// Keep only the chosen live connection; everything else is
+							// just probe state and should be torn down.
 							closeUnusedConnections(states, selected.raw)
 							return states[selected.raw], states, nil
 						}
@@ -65,6 +75,8 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 					}
 					prev, exists := states[res.target.raw]
 					if !exists || res.at.After(prev.at) || (res.at.Equal(prev.at) && res.up && !prev.up) {
+						// If a newer result replaces an older successful one, close
+						// the previous connection so only the latest candidate stays live.
 						closeConn(prev.conn)
 						states[res.target.raw] = res
 					}
@@ -79,6 +91,9 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 				}
 			}
 		case <-ticker.C:
+			// Selection happens on the interval tick so several targets can finish
+			// racing in the same window and we still prefer by configured order,
+			// not merely by whichever goroutine reported first.
 			if selected, ok := firstReachable(cfg.targets, states); ok {
 				cancel()
 				closeUnusedConnections(states, selected.raw)
@@ -118,8 +133,9 @@ func probeOnce(ctx context.Context, t target, connectTimeout time.Duration) prob
 	return probeResult{
 		target: t,
 		up:     false,
-		err:    fmt.Errorf("probe failed after %s: %w", time.Since(start).Round(time.Millisecond), err),
-		at:     time.Now(),
+		// Keep the last dial failure for dry-run diagnostics.
+		err: fmt.Errorf("probe failed after %s: %w", time.Since(start).Round(time.Millisecond), err),
+		at:  time.Now(),
 	}
 }
 
@@ -155,6 +171,7 @@ func printDryRun(selected *probeResult, states map[string]probeResult) {
 }
 
 func sortStates(states map[string]probeResult) []probeResult {
+	// Dry-run output is debug-oriented, so keep the order deterministic.
 	results := make([]probeResult, 0, len(states))
 	for _, state := range states {
 		results = append(results, state)

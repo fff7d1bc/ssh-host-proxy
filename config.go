@@ -27,6 +27,8 @@ func parseConfig(args []string) (config, error) {
 	var cfg config
 
 	fs := flag.NewFlagSet("ssh-host-proxy", flag.ContinueOnError)
+	// We render help ourselves so the output stays consistent with the
+	// double-dash style documented in the README.
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&targetsArg, "targets", "", "Comma-separated host:port targets in priority order")
 	fs.DurationVar(&cfg.selectionInterval, "selection-interval", time.Second, "How often to probe targets and re-evaluate which ones are reachable")
@@ -107,6 +109,8 @@ func parseTargets(value string) ([]target, error) {
 			return nil, fmt.Errorf("invalid target %q: %w", raw, err)
 		}
 		if _, ok := seen[raw]; ok {
+			// Duplicates do not change routing priority, so keep the first entry
+			// and ignore repeats instead of treating them as a hard error.
 			continue
 		}
 		seen[raw] = struct{}{}

@@ -26,6 +26,9 @@ func passConn(conn net.Conn) error {
 
 	var sendErr error
 	controlErr := rawConn.Control(func(fd uintptr) {
+		// ProxyUseFdpass expects the proxy command to return a connected socket
+		// over stdout using SCM_RIGHTS. After that, ssh owns the connection and
+		// this helper can exit.
 		rights := syscall.UnixRights(int(fd))
 		sendErr = syscall.Sendmsg(int(os.Stdout.Fd()), []byte{0}, rights, nil, 0)
 	})
