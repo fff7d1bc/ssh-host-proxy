@@ -1,19 +1,31 @@
 APP := ssh-host-proxy
-STATIC_APP := $(APP)-static
 BUILD_DIR := $(CURDIR)/build
-BIN_DIR := $(BUILD_DIR)/bin
-HOST_BIN_DIR := $(BIN_DIR)/host
-RELEASE_DIR := $(BIN_DIR)/release
-GOCACHE := $(BUILD_DIR)/gocache
-GOMODCACHE := $(BUILD_DIR)/gomodcache
-GOPATH := $(BUILD_DIR)/gopath
-GOTMPDIR := $(BUILD_DIR)/tmp
-GOTELEMETRYDIR := $(BUILD_DIR)/telemetry
-GOENV := off
-GOFLAGS := -modcacherw
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
+PLATFORM := $(GOOS)-$(GOARCH)
+PLATFORM_BUILD_DIR := $(BUILD_DIR)/$(PLATFORM)
+BIN_DIR := $(PLATFORM_BUILD_DIR)/bin
+BIN := $(BIN_DIR)/$(APP)
+STATIC_BIN := $(BIN_DIR)/$(APP)-static
 GO_SOURCES := $(wildcard *.go)
+GOCACHE := $(PLATFORM_BUILD_DIR)/gocache
+GOMODCACHE := $(PLATFORM_BUILD_DIR)/gomodcache
+GOPATH := $(PLATFORM_BUILD_DIR)/gopath
+GOTMPDIR := $(PLATFORM_BUILD_DIR)/tmp
+GOTELEMETRYDIR := $(PLATFORM_BUILD_DIR)/telemetry
+GOENV := off
+GOFLAGS := -modcacherw
+
+DARWIN_ARM64_DIR := $(BUILD_DIR)/darwin-arm64
+LINUX_ARM64_DIR := $(BUILD_DIR)/linux-arm64
+LINUX_AMD64_DIR := $(BUILD_DIR)/linux-amd64
+DARWIN_ARM64_BIN := $(DARWIN_ARM64_DIR)/bin/$(APP)-static
+LINUX_ARM64_BIN := $(LINUX_ARM64_DIR)/bin/$(APP)-static
+LINUX_AMD64_BIN := $(LINUX_AMD64_DIR)/bin/$(APP)-static
+RELEASE_ASSETS_DIR := $(BUILD_DIR)/release-assets
+DARWIN_ARM64_ASSET := $(RELEASE_ASSETS_DIR)/$(APP)-static-darwin-arm64
+LINUX_ARM64_ASSET := $(RELEASE_ASSETS_DIR)/$(APP)-static-linux-arm64
+LINUX_AMD64_ASSET := $(RELEASE_ASSETS_DIR)/$(APP)-static-linux-amd64
 
 export GOCACHE
 export GOMODCACHE
@@ -24,43 +36,50 @@ export GOENV
 export GOFLAGS
 export GOTELEMETRY=off
 
-.PHONY: all build static release run test install install-mutable clean
+.PHONY: all build static release release-assets run test install clean
 
 all: build
 
-build: $(HOST_BIN_DIR)/$(APP)
+build: $(BIN)
 
-static: $(HOST_BIN_DIR)/$(STATIC_APP)
+static: $(STATIC_BIN)
 
 release: \
-	$(RELEASE_DIR)/$(APP)-static-darwin-aarch64 \
-	$(RELEASE_DIR)/$(APP)-static-linux-aarch64 \
-	$(RELEASE_DIR)/$(APP)-static-linux-x86_64
+	$(DARWIN_ARM64_BIN) \
+	$(LINUX_ARM64_BIN) \
+	$(LINUX_AMD64_BIN)
 
-$(HOST_BIN_DIR)/$(APP): go.mod $(GO_SOURCES)
-	mkdir -p "$(HOST_BIN_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
-	rm -f "$(BIN_DIR)/$(APP)"
-	go build -o "$(HOST_BIN_DIR)/$(APP)" .
+release-assets: \
+	$(DARWIN_ARM64_ASSET) \
+	$(LINUX_ARM64_ASSET) \
+	$(LINUX_AMD64_ASSET)
 
-$(HOST_BIN_DIR)/$(STATIC_APP): go.mod $(GO_SOURCES)
-	mkdir -p "$(HOST_BIN_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
-	rm -f "$(BIN_DIR)/$(STATIC_APP)"
-	CGO_ENABLED=0 GOOS="$(GOOS)" GOARCH="$(GOARCH)" go build -trimpath -ldflags='-s -w' -o "$(HOST_BIN_DIR)/$(STATIC_APP)" .
+$(BIN): go.mod $(GO_SOURCES)
+	mkdir -p "$(BIN_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
+	GOOS="$(GOOS)" GOARCH="$(GOARCH)" go build -trimpath -o "$(BIN)" .
 
-$(RELEASE_DIR)/$(APP)-static-darwin-aarch64: go.mod $(GO_SOURCES)
-	mkdir -p "$(RELEASE_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o "$@" .
+$(BUILD_DIR)/%/bin/$(APP)-static: go.mod $(GO_SOURCES)
+	platform="$*"; \
+	platform_dir="$(BUILD_DIR)/$*"; \
+	goos="$${platform%-*}"; \
+	goarch="$${platform##*-}"; \
+	mkdir -p "$(@D)" "$$platform_dir/gocache" "$$platform_dir/gomodcache" "$$platform_dir/gopath" "$$platform_dir/tmp" "$$platform_dir/telemetry"; \
+	GOCACHE="$$platform_dir/gocache" GOMODCACHE="$$platform_dir/gomodcache" GOPATH="$$platform_dir/gopath" GOTMPDIR="$$platform_dir/tmp" GOTELEMETRYDIR="$$platform_dir/telemetry" GOENV=off GOFLAGS=-modcacherw GOTELEMETRY=off CGO_ENABLED=0 GOOS="$$goos" GOARCH="$$goarch" go build -trimpath -tags "netgo osusergo" -ldflags "-s -w -buildid=" -o "$@" .
 
-$(RELEASE_DIR)/$(APP)-static-linux-aarch64: go.mod $(GO_SOURCES)
-	mkdir -p "$(RELEASE_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o "$@" .
+$(DARWIN_ARM64_ASSET): $(DARWIN_ARM64_BIN)
+	mkdir -p "$(RELEASE_ASSETS_DIR)"
+	cp "$(DARWIN_ARM64_BIN)" "$@"
 
-$(RELEASE_DIR)/$(APP)-static-linux-x86_64: go.mod $(GO_SOURCES)
-	mkdir -p "$(RELEASE_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$@" .
+$(LINUX_ARM64_ASSET): $(LINUX_ARM64_BIN)
+	mkdir -p "$(RELEASE_ASSETS_DIR)"
+	cp "$(LINUX_ARM64_BIN)" "$@"
+
+$(LINUX_AMD64_ASSET): $(LINUX_AMD64_BIN)
+	mkdir -p "$(RELEASE_ASSETS_DIR)"
+	cp "$(LINUX_AMD64_BIN)" "$@"
 
 run: build
-	"$(HOST_BIN_DIR)/$(APP)"
+	"$(BIN)" $(ARGS)
 
 test:
 	mkdir -p "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
@@ -69,19 +88,10 @@ test:
 install: build
 	if [ "$$(id -u)" -eq 0 ]; then \
 		mkdir -p /usr/local/bin; \
-		cp "$(HOST_BIN_DIR)/$(APP)" "/usr/local/bin/$(APP)"; \
+		install -m 0755 "$(BIN)" "/usr/local/bin/$(APP)"; \
 	else \
 		mkdir -p "$$HOME/.local/bin"; \
-		cp "$(HOST_BIN_DIR)/$(APP)" "$$HOME/.local/bin/$(APP)"; \
-	fi
-
-install-mutable: build
-	if [ "$$(id -u)" -eq 0 ]; then \
-		mkdir -p /usr/local/bin; \
-		ln -sfn "$(HOST_BIN_DIR)/$(APP)" "/usr/local/bin/$(APP)"; \
-	else \
-		mkdir -p "$$HOME/.local/bin"; \
-		ln -sfn "$(HOST_BIN_DIR)/$(APP)" "$$HOME/.local/bin/$(APP)"; \
+		install -m 0755 "$(BIN)" "$$HOME/.local/bin/$(APP)"; \
 	fi
 
 clean:

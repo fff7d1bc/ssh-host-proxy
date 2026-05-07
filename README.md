@@ -104,11 +104,21 @@ Options:
 
 ## Build
 
-Local host build:
+Local platform build:
 
 ```
 make build
 ```
+
+This produces `build/<goos>-<goarch>/bin/ssh-host-proxy`.
+
+Local static build:
+
+```
+make static
+```
+
+This produces `build/<goos>-<goarch>/bin/ssh-host-proxy-static`.
 
 Release builds:
 
@@ -116,7 +126,20 @@ Release builds:
 make release
 ```
 
-This produces static binaries in `build/bin/release/`.
+This produces static binaries in platform build directories:
+
+- `build/darwin-arm64/bin/ssh-host-proxy-static`
+- `build/linux-arm64/bin/ssh-host-proxy-static`
+- `build/linux-amd64/bin/ssh-host-proxy-static`
+
+Release asset staging:
+
+```
+make release-assets
+```
+
+This copies the release binaries to `build/release-assets/` with unique
+platform-suffixed filenames for GitHub Release uploads.
 
 ## Install
 
@@ -126,16 +149,5 @@ make install
 
 Default install behavior:
 
-- when run as root, copies the host binary to `/usr/local/bin/ssh-host-proxy`
-- when run as a normal user, copies the host binary to `~/.local/bin/ssh-host-proxy`
-
-Mutable install:
-
-```
-make install-mutable
-```
-
-- when run as root, creates a symlink at `/usr/local/bin/ssh-host-proxy`
-- when run as a normal user, creates a symlink at `~/.local/bin/ssh-host-proxy`
-
-`install-mutable` is useful if you want rebuilds in the repo to immediately affect the installed command.
+- when run as root, copies the local platform binary to `/usr/local/bin/ssh-host-proxy`
+- when run as a normal user, copies the local platform binary to `~/.local/bin/ssh-host-proxy`
