@@ -14,7 +14,7 @@ GOPATH := $(PLATFORM_BUILD_DIR)/gopath
 GOTMPDIR := $(PLATFORM_BUILD_DIR)/tmp
 GOTELEMETRYDIR := $(PLATFORM_BUILD_DIR)/telemetry
 GOENV := off
-GOFLAGS := -modcacherw
+GOFLAGS := -modcacherw -buildvcs=false
 
 DARWIN_ARM64_DIR := $(BUILD_DIR)/darwin-arm64
 LINUX_ARM64_DIR := $(BUILD_DIR)/linux-arm64
