@@ -57,6 +57,9 @@ func parseConfig(args []string) (config, error) {
 		printUsage(os.Stderr)
 		return cfg, errUsageDisplayed
 	}
+	if args := fs.Args(); len(args) > 0 {
+		return cfg, fmt.Errorf("unexpected positional arguments: %s", strings.Join(args, " "))
+	}
 
 	if strings.TrimSpace(targetsArg) == "" {
 		return cfg, errors.New("--targets is required")
@@ -105,8 +108,15 @@ func parseTargets(value string) ([]target, error) {
 		if raw == "" {
 			return nil, errors.New("targets list contains an empty entry")
 		}
-		if _, _, err := net.SplitHostPort(raw); err != nil {
+		host, port, err := net.SplitHostPort(raw)
+		if err != nil {
 			return nil, fmt.Errorf("invalid target %q: %w", raw, err)
+		}
+		if host == "" {
+			return nil, fmt.Errorf("invalid target %q: host is required", raw)
+		}
+		if port == "" {
+			return nil, fmt.Errorf("invalid target %q: port is required", raw)
 		}
 		if _, ok := seen[raw]; ok {
 			// Duplicates do not change routing priority, so keep the first entry

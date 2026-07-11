@@ -52,6 +52,26 @@ func TestParseTargetsRejectsInvalidEntry(t *testing.T) {
 	}
 }
 
+func TestParseTargetsRejectsEmptyHostOrPort(t *testing.T) {
+	for _, value := range []string{":22", "example.local:"} {
+		t.Run(value, func(t *testing.T) {
+			if _, err := parseTargets(value); err == nil {
+				t.Fatalf("expected %q to be rejected", value)
+			}
+		})
+	}
+}
+
+func TestParseTargetsAcceptsIPv6AndNamedPort(t *testing.T) {
+	targets, err := parseTargets("[2001:db8::1]:22,example.local:ssh")
+	if err != nil {
+		t.Fatalf("parseTargets returned error: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("expected two targets, got %d", len(targets))
+	}
+}
+
 func TestFirstReachablePrefersConfiguredOrder(t *testing.T) {
 	targets := []target{
 		{raw: "wired.local:22"},
@@ -121,6 +141,16 @@ func TestParseConfigAcceptsSelectionIntervalShorterThanTimeout(t *testing.T) {
 
 	if !cfg.fdpass {
 		t.Fatal("expected fdpass to be enabled")
+	}
+}
+
+func TestParseConfigRejectsUnexpectedPositionalArguments(t *testing.T) {
+	_, err := parseConfig([]string{
+		"--targets", "example.local:22",
+		"unexpected",
+	})
+	if err == nil {
+		t.Fatal("expected unexpected positional argument error")
 	}
 }
 
