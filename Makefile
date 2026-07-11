@@ -64,7 +64,7 @@ $(BUILD_DIR)/%/bin/$(APP)-static: go.mod $(GO_SOURCES)
 	goos="$${platform%-*}"; \
 	goarch="$${platform##*-}"; \
 	mkdir -p "$(@D)" "$$platform_dir/gocache" "$$platform_dir/gomodcache" "$$platform_dir/gopath" "$$platform_dir/tmp" "$$platform_dir/telemetry"; \
-	GOCACHE="$$platform_dir/gocache" GOMODCACHE="$$platform_dir/gomodcache" GOPATH="$$platform_dir/gopath" GOTMPDIR="$$platform_dir/tmp" GOTELEMETRYDIR="$$platform_dir/telemetry" GOENV=off GOFLAGS=-modcacherw GOTELEMETRY=off CGO_ENABLED=0 GOOS="$$goos" GOARCH="$$goarch" go build -trimpath -tags "netgo osusergo" -ldflags "-s -w -buildid=" -o "$@" .
+	GOCACHE="$$platform_dir/gocache" GOMODCACHE="$$platform_dir/gomodcache" GOPATH="$$platform_dir/gopath" GOTMPDIR="$$platform_dir/tmp" GOTELEMETRYDIR="$$platform_dir/telemetry" GOENV=off GOTELEMETRY=off CGO_ENABLED=0 GOOS="$$goos" GOARCH="$$goarch" go build -trimpath -tags "netgo osusergo" -ldflags "-s -w -buildid=" -o "$@" .
 
 $(DARWIN_ARM64_ASSET): $(DARWIN_ARM64_BIN)
 	mkdir -p "$(RELEASE_ASSETS_DIR)"
