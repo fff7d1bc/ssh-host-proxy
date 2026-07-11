@@ -34,13 +34,14 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 
 	states := make(map[string]probeResult, len(cfg.targets))
 	results := make(chan probeResult, len(cfg.targets))
+	probe := probeFunc
 	var wg sync.WaitGroup
 
 	for _, t := range cfg.targets {
 		wg.Add(1)
 		go func(t target) {
 			defer wg.Done()
-			results <- probeFunc(ctx, t, cfg.connectTimeout)
+			results <- probe(ctx, t, cfg.connectTimeout)
 		}(t)
 	}
 
