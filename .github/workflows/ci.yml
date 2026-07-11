@@ -8,7 +8,7 @@ jobs:
   test-and-release-build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -29,6 +29,14 @@ jobs:
       - name: Stage GitHub Release Assets
         if: startsWith(github.ref, 'refs/tags/')
         run: make release-assets
+
+      - name: Upload GitHub Release Assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v6
+        with:
+          name: github-release-assets
+          path: build/release-assets/
+          if-no-files-found: error
 
       - name: Upload Darwin ARM64 Artifact
         uses: actions/upload-artifact@v6
@@ -51,8 +59,21 @@ jobs:
           path: build/linux-amd64/bin/ssh-host-proxy-static
           if-no-files-found: error
 
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: test-and-release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download GitHub Release Assets
+        uses: actions/download-artifact@v6
+        with:
+          name: github-release-assets
+          path: build/release-assets
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
