@@ -112,13 +112,15 @@ make build
 
 This produces `build/<goos>-<goarch>/bin/ssh-host-proxy`.
 
-Local static build:
+Local CGO-disabled build:
 
 ```
 make static
 ```
 
-This produces `build/<goos>-<goarch>/bin/ssh-host-proxy-static`.
+This produces `build/<goos>-<goarch>/bin/ssh-host-proxy-static`. The `static`
+target name is retained for the release workflow: Linux outputs are statically
+linked, while the Darwin output still links standard macOS system libraries.
 
 Release builds:
 
@@ -126,7 +128,8 @@ Release builds:
 make release
 ```
 
-This produces static binaries in platform build directories:
+This produces stripped, CGO-disabled release binaries in platform build
+directories:
 
 - `build/darwin-arm64/bin/ssh-host-proxy-static`
 - `build/linux-arm64/bin/ssh-host-proxy-static`
