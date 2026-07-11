@@ -75,6 +75,31 @@ func TestFirstReachablePrefersConfiguredOrder(t *testing.T) {
 	}
 }
 
+func TestDrainReadyProbeResultsIncludesQueuedPreferredSuccess(t *testing.T) {
+	targets := []target{
+		{raw: "preferred:22"},
+		{raw: "fallback:22"},
+	}
+	states := map[string]probeResult{
+		"fallback:22": {target: targets[1], up: true, at: time.Now()},
+	}
+	results := make(chan probeResult, 1)
+	results <- probeResult{target: targets[0], up: true, at: time.Now()}
+	close(results)
+
+	if closed := drainReadyProbeResults(results, states); !closed {
+		t.Fatal("expected drainReadyProbeResults to observe the closed channel")
+	}
+
+	selected, ok := firstReachable(targets, states)
+	if !ok {
+		t.Fatal("expected a reachable target")
+	}
+	if selected.raw != "preferred:22" {
+		t.Fatalf("expected preferred:22, got %q", selected.raw)
+	}
+}
+
 func TestParseConfigAcceptsSelectionIntervalShorterThanTimeout(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"--targets", "example.local:22",

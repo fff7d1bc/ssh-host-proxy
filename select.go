@@ -59,45 +59,29 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 			// available right now, then return. Waiting for every goroutine to
 			// unwind here would make the timeout effectively "connect-timeout plus
 			// cleanup time".
-			for {
-				select {
-				case res, ok := <-results:
-					if !ok {
-						if selected, ok := firstReachable(cfg.targets, states); ok {
-							cancel()
-							// Keep only the chosen live connection; everything else is
-							// just probe state and should be torn down.
-							closeUnusedConnections(states, selected.raw)
-							return states[selected.raw], states, nil
-						}
-						closeAllConnections(states)
-						return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
-					}
-					prev, exists := states[res.target.raw]
-					if !exists || res.at.After(prev.at) || (res.at.Equal(prev.at) && res.up && !prev.up) {
-						// If a newer result replaces an older successful one, close
-						// the previous connection so only the latest candidate stays live.
-						closeConn(prev.conn)
-						states[res.target.raw] = res
-					}
-				default:
-					if selected, ok := firstReachable(cfg.targets, states); ok {
-						cancel()
-						closeUnusedConnections(states, selected.raw)
-						return states[selected.raw], states, nil
-					}
-					closeAllConnections(states)
-					return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
-				}
+			drainReadyProbeResults(results, states)
+			if selected, ok := firstReachable(cfg.targets, states); ok {
+				cancel()
+				// Keep only the chosen live connection; everything else is
+				// just probe state and should be torn down.
+				closeUnusedConnections(states, selected.raw)
+				return states[selected.raw], states, nil
 			}
+			closeAllConnections(states)
+			return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 		case <-ticker.C:
 			// Selection happens on the interval tick so several targets can finish
 			// racing in the same window and we still prefer by configured order,
 			// not merely by whichever goroutine reported first.
+			closed := drainReadyProbeResults(results, states)
 			if selected, ok := firstReachable(cfg.targets, states); ok {
 				cancel()
 				closeUnusedConnections(states, selected.raw)
 				return states[selected.raw], states, nil
+			}
+			if closed {
+				closeAllConnections(states)
+				return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 			}
 		case res, ok := <-results:
 			if !ok {
@@ -109,12 +93,32 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 				closeAllConnections(states)
 				return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 			}
-			prev, exists := states[res.target.raw]
-			if !exists || res.at.After(prev.at) || (res.at.Equal(prev.at) && res.up && !prev.up) {
-				closeConn(prev.conn)
-				states[res.target.raw] = res
-			}
+			recordProbeResult(states, res)
 		}
+	}
+}
+
+func drainReadyProbeResults(results <-chan probeResult, states map[string]probeResult) bool {
+	for {
+		select {
+		case res, ok := <-results:
+			if !ok {
+				return true
+			}
+			recordProbeResult(states, res)
+		default:
+			return false
+		}
+	}
+}
+
+func recordProbeResult(states map[string]probeResult, res probeResult) {
+	prev, exists := states[res.target.raw]
+	if !exists || res.at.After(prev.at) || (res.at.Equal(prev.at) && res.up && !prev.up) {
+		// If a newer result replaces an older successful one, close the previous
+		// connection so only the latest candidate stays live.
+		closeConn(prev.conn)
+		states[res.target.raw] = res
 	}
 }
 
