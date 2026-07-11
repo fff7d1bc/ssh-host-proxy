@@ -30,7 +30,6 @@ var probeFunc = probeOnce
 
 func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.connectTimeout)
-	defer cancel()
 
 	states := make(map[string]probeResult, len(cfg.targets))
 	results := make(chan probeResult, len(cfg.targets))
@@ -48,6 +47,12 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 	go func() {
 		wg.Wait()
 		close(results)
+	}()
+	defer func() {
+		cancel()
+		// Selection must not wait for every canceled dial to unwind, but any
+		// connection returned after this function exits still belongs to us.
+		go closeRemainingProbeConnections(results)
 	}()
 
 	ticker := time.NewTicker(cfg.selectionInterval)
@@ -96,6 +101,12 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 			}
 			recordProbeResult(states, res)
 		}
+	}
+}
+
+func closeRemainingProbeConnections(results <-chan probeResult) {
+	for res := range results {
+		closeConn(res.conn)
 	}
 }
 

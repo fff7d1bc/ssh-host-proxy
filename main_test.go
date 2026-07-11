@@ -366,3 +366,94 @@ func TestWaitForTargetReturnsWinningLiveConnAndClosesLosingSuccessConn(t *testin
 
 	closeConn(selected.conn)
 }
+
+func TestWaitForTargetClosesSuccessfulProbeReturningAfterSelection(t *testing.T) {
+	origProbeFunc := probeFunc
+	t.Cleanup(func() {
+		probeFunc = origProbeFunc
+	})
+
+	winnerConn := &fakeConn{}
+	lateConn := &fakeConn{}
+	probeFunc = func(ctx context.Context, t target, _ time.Duration) probeResult {
+		if t.raw == "winner:22" {
+			time.Sleep(5 * time.Millisecond)
+			return probeResult{target: t, conn: winnerConn, up: true, at: time.Now()}
+		}
+
+		<-ctx.Done()
+		return probeResult{target: t, conn: lateConn, up: true, at: time.Now()}
+	}
+
+	cfg := config{
+		targets: []target{
+			{raw: "winner:22"},
+			{raw: "late:22"},
+		},
+		selectionInterval: time.Millisecond,
+		connectTimeout:    100 * time.Millisecond,
+	}
+
+	selected, _, err := waitForTarget(cfg)
+	if err != nil {
+		t.Fatalf("waitForTarget returned error: %v", err)
+	}
+	if selected.conn != winnerConn {
+		t.Fatal("expected the winning connection to be returned")
+	}
+	waitForClosedConn(t, lateConn)
+	if winnerConn.closed.Load() != 0 {
+		t.Fatal("expected the winning connection to remain open")
+	}
+	closeConn(selected.conn)
+}
+
+func TestWaitForTargetClosesSuccessfulProbeReturningAfterTimeout(t *testing.T) {
+	origProbeFunc := probeFunc
+	t.Cleanup(func() {
+		probeFunc = origProbeFunc
+	})
+
+	lateConn := &fakeConn{}
+	release := make(chan struct{})
+	probeFunc = func(_ context.Context, t target, _ time.Duration) probeResult {
+		<-release
+		return probeResult{target: t, conn: lateConn, up: true, at: time.Now()}
+	}
+
+	cfg := config{
+		targets:           []target{{raw: "late:22"}},
+		selectionInterval: time.Millisecond,
+		connectTimeout:    10 * time.Millisecond,
+	}
+
+	start := time.Now()
+	_, _, err := waitForTarget(cfg)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("expected prompt timeout, got %v", elapsed)
+	}
+
+	close(release)
+	waitForClosedConn(t, lateConn)
+}
+
+func waitForClosedConn(t *testing.T, conn *fakeConn) {
+	t.Helper()
+	deadline := time.After(100 * time.Millisecond)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("connection was not closed")
+		case <-ticker.C:
+			if conn.closed.Load() > 0 {
+				return
+			}
+		}
+	}
+}
