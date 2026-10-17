@@ -76,9 +76,9 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 			closeAllConnections(states)
 			return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 		case <-ticker.C:
-			// Selection happens on the interval tick so several targets can finish
-			// racing in the same window and we still prefer by configured order,
-			// not merely by whichever goroutine reported first.
+			// If higher-priority probes are still pending, the interval bounds
+			// how long we wait before using an already-successful fallback.
+			// Drain queued results to prefer configured order at this point.
 			closed := drainReadyProbeResults(results, states)
 			if selected, ok := firstReachable(cfg.targets, states); ok {
 				cancel()
@@ -100,6 +100,11 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 				return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
 			}
 			recordProbeResult(states, res)
+			if selected, ok := settledReachable(cfg.targets, states); ok {
+				cancel()
+				closeUnusedConnections(states, selected.raw)
+				return states[selected.raw], states, nil
+			}
 		}
 	}
 }
@@ -160,6 +165,21 @@ func firstReachable(targets []target, states map[string]probeResult) (target, bo
 		state, ok := states[t.raw]
 		if ok && state.up {
 			return state.target, true
+		}
+	}
+	return target{}, false
+}
+
+func settledReachable(targets []target, states map[string]probeResult) (target, bool) {
+	// Each target is probed once. Once every higher-priority target has
+	// failed, no pending result can improve on this successful connection.
+	for _, t := range targets {
+		state, ok := states[t.raw]
+		if !ok {
+			return target{}, false
+		}
+		if state.up {
+			return t, true
 		}
 	}
 	return target{}, false

@@ -32,7 +32,7 @@ The proxy then:
 2. keeps those connection attempts in flight for up to `--connect-timeout` total
 3. every `--selection-interval`, checks whether any target has already responded
 4. if multiple targets have responded, picks the first one in the order you provided
-5. if all probe attempts finish before the next selection check, it picks immediately and does not wait for the interval
+5. picks immediately if a target succeeds and all higher-priority targets have already failed; it also finishes early if all probe attempts complete
 6. once a target is picked, the remaining in-flight probe attempts are canceled
 7. in normal mode, it reuses that already-connected socket for the SSH session instead of dialing again
 8. exits with error if no target responds
