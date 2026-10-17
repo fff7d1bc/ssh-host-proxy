@@ -10,6 +10,10 @@ import (
 )
 
 func passConn(conn net.Conn) error {
+	return passConnTo(conn, os.Stdout.Fd())
+}
+
+func passConnTo(conn net.Conn, controlFD uintptr) error {
 	if conn == nil {
 		return errors.New("no connected socket to pass")
 	}
@@ -30,7 +34,7 @@ func passConn(conn net.Conn) error {
 		// over stdout using SCM_RIGHTS. After that, ssh owns the connection and
 		// this helper can exit.
 		rights := syscall.UnixRights(int(fd))
-		sendErr = syscall.Sendmsg(int(os.Stdout.Fd()), []byte{0}, rights, nil, 0)
+		sendErr = syscall.Sendmsg(int(controlFD), []byte{0}, rights, nil, 0)
 	})
 	closeConn(conn)
 	if controlErr != nil {
