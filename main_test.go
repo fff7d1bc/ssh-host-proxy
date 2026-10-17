@@ -255,8 +255,8 @@ func TestWaitForTargetReturnsErrorWhenNothingResponds(t *testing.T) {
 	}
 
 	_, _, err := waitForTarget(cfg)
-	if err == nil {
-		t.Fatal("expected timeout error, got nil")
+	if err == nil || err.Error() != "no reachable targets responded before --connect-timeout" {
+		t.Fatalf("expected timeout diagnostic, got %v", err)
 	}
 }
 

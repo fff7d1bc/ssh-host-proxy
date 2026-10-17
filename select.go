@@ -74,7 +74,7 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 				return states[selected.raw], states, nil
 			}
 			closeAllConnections(states)
-			return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
+			return probeResult{}, states, selectionFailure(ctx)
 		case <-ticker.C:
 			// If higher-priority probes are still pending, the interval bounds
 			// how long we wait before using an already-successful fallback.
@@ -87,7 +87,7 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 			}
 			if closed {
 				closeAllConnections(states)
-				return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
+				return probeResult{}, states, selectionFailure(ctx)
 			}
 		case res, ok := <-results:
 			if !ok {
@@ -97,7 +97,7 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 					return states[selected.raw], states, nil
 				}
 				closeAllConnections(states)
-				return probeResult{}, states, errors.New("no reachable targets responded before --connect-timeout")
+				return probeResult{}, states, selectionFailure(ctx)
 			}
 			recordProbeResult(states, res)
 			if selected, ok := settledReachable(cfg.targets, states); ok {
@@ -107,6 +107,15 @@ func waitForTarget(cfg config) (probeResult, map[string]probeResult, error) {
 			}
 		}
 	}
+}
+
+func selectionFailure(ctx context.Context) error {
+	// Channel closure and the deadline may become ready together. Use the
+	// context state so the diagnostic does not depend on which branch ran.
+	if ctx.Err() == context.DeadlineExceeded {
+		return errors.New("no reachable targets responded before --connect-timeout")
+	}
+	return errors.New("all target connection attempts failed")
 }
 
 func closeRemainingProbeConnections(results <-chan probeResult) {

@@ -2,9 +2,74 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
+	"os"
 	"testing"
 	"time"
 )
+
+func TestWaitForTargetReportsCompletedFailures(t *testing.T) {
+	originalProbe := probeFunc
+	t.Cleanup(func() { probeFunc = originalProbe })
+	probeFunc = func(_ context.Context, tg target, _ time.Duration) probeResult {
+		return probeResult{target: tg, err: errors.New("connection refused")}
+	}
+	start := time.Now()
+	_, states, err := waitForTarget(config{
+		targets:           []target{{raw: "first:22"}, {raw: "second:22"}},
+		selectionInterval: time.Second, connectTimeout: 2 * time.Second,
+	})
+	if err == nil || err.Error() != "all target connection attempts failed" {
+		t.Fatalf("unexpected completed-probe diagnostic: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
+		t.Fatalf("completed failures waited for interval or deadline: %v", elapsed)
+	}
+	if len(states) != 2 {
+		t.Fatalf("expected both probe failures, got %v", states)
+	}
+}
+
+func TestSelectionFailureUsesContextDeadline(t *testing.T) {
+	// A results channel can close at the deadline. The same context state
+	// must produce the timeout diagnostic regardless of which event won.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if got := selectionFailure(ctx).Error(); got != "no reachable targets responded before --connect-timeout" {
+		t.Fatalf("unexpected expired-context diagnostic: %s", got)
+	}
+	if got := selectionFailure(context.Background()).Error(); got != "all target connection attempts failed" {
+		t.Fatalf("unexpected live-context diagnostic: %s", got)
+	}
+}
+
+func TestPrintDryRunOrdersFailureDiagnosticsOnStderr(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	originalStderr := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = originalStderr }()
+	printDryRun(nil, map[string]probeResult{
+		"z:22": {target: target{raw: "z:22"}, err: errors.New("connection refused")},
+		"a:22": {target: target{raw: "a:22"}, err: context.DeadlineExceeded},
+	})
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "selected target: none\noffline a:22 (context deadline exceeded)\noffline z:22 (connection refused)\n"
+	if string(output) != want {
+		t.Fatalf("unexpected dry-run stderr: %q, want %q", output, want)
+	}
+}
 
 func TestSettledReachable(t *testing.T) {
 	targets := []target{{raw: "preferred:22"}, {raw: "fallback:22"}, {raw: "last:22"}}

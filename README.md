@@ -113,6 +113,11 @@ Exit codes:
 - `1`: runtime failure during selection, descriptor passing, or proxying
 - `2`: invalid command-line arguments
 
+If all connection attempts fail before the deadline, the diagnostic is
+`all target connection attempts failed`. If the overall deadline expires with
+no reachable target, it is
+`no reachable targets responded before --connect-timeout`.
+
 ## Build
 
 Local platform build:
