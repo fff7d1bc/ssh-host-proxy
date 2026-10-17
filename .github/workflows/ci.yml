@@ -23,6 +23,15 @@ jobs:
       - name: Run Tests
         run: make test
 
+      - name: Run Race Tests
+        run: make test-race
+
+      - name: Run Vet
+        run: make vet
+
+      - name: Compile Windows Tests
+        run: make test-compile GOOS=windows GOARCH=amd64
+
       - name: Build Release Artifacts
         run: make release
 

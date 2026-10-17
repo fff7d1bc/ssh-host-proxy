@@ -160,6 +160,31 @@ make release-assets
 This copies the release binaries to `build/release-assets/` with unique
 platform-suffixed filenames for GitHub Release uploads.
 
+## Development Checks
+
+Run tests and static analysis with repository-local Go state:
+
+```
+make test
+make test-race
+make vet
+```
+
+`make test-race` requires a host platform supported by Go's race detector,
+CGO enabled, and a suitable C compiler. Ordinary `make test` remains available
+without the race detector.
+
+Compile tests for another platform without running them:
+
+```
+make test-compile GOOS=windows GOARCH=amd64
+```
+
+This writes `build/windows-amd64/bin/ssh-host-proxy.test.exe`. Other targets use
+`build/<goos>-<goarch>/bin/ssh-host-proxy.test` (with `.exe` on Windows).
+CI uses the Windows compile check to cover the non-Unix fdpass fallback;
+cross-compilation does not verify runtime behavior on that platform.
+
 ## Install
 
 ```

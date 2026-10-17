@@ -7,6 +7,7 @@ PLATFORM_BUILD_DIR := $(BUILD_DIR)/$(PLATFORM)
 BIN_DIR := $(PLATFORM_BUILD_DIR)/bin
 BIN := $(BIN_DIR)/$(APP)
 STATIC_BIN := $(BIN_DIR)/$(APP)-static
+TEST_BIN := $(BIN_DIR)/$(APP).test$(if $(filter windows,$(GOOS)),.exe)
 GO_SOURCES := $(wildcard *.go)
 GOCACHE := $(PLATFORM_BUILD_DIR)/gocache
 GOMODCACHE := $(PLATFORM_BUILD_DIR)/gomodcache
@@ -36,7 +37,7 @@ export GOENV
 export GOFLAGS
 export GOTELEMETRY=off
 
-.PHONY: all build static release release-assets run test install clean
+.PHONY: all build static release release-assets run test test-race vet test-compile install clean
 
 all: build
 
@@ -84,6 +85,18 @@ run: build
 test:
 	mkdir -p "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
 	go test ./...
+
+test-race:
+	mkdir -p "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
+	GOOS="$(GOOS)" GOARCH="$(GOARCH)" go test -race ./...
+
+vet:
+	mkdir -p "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
+	GOOS="$(GOOS)" GOARCH="$(GOARCH)" go vet ./...
+
+test-compile:
+	mkdir -p "$(BIN_DIR)" "$(GOCACHE)" "$(GOMODCACHE)" "$(GOPATH)" "$(GOTMPDIR)" "$(GOTELEMETRYDIR)"
+	GOOS="$(GOOS)" GOARCH="$(GOARCH)" go test -c -o "$(TEST_BIN)" .
 
 install: build
 	if [ "$$(id -u)" -eq 0 ]; then \
