@@ -28,7 +28,7 @@ ssh-host-proxy --targets 192.168.1.10:22,host.local:22,100.64.10.20:22
 
 The proxy then:
 
-1. starts TCP connection attempts to all targets in parallel
+1. starts one TCP connection attempt per target, all in parallel
 2. keeps those connection attempts in flight for up to `--connect-timeout` total
 3. every `--selection-interval`, checks whether any target has already responded
 4. if multiple targets have responded, picks the first one in the order you provided
@@ -91,9 +91,9 @@ Options:
   --targets string
         Comma-separated host:port targets in priority order
   --selection-interval duration
-        How often to probe targets and re-evaluate which ones are reachable (default 1s)
+        How often to evaluate completed probes for target selection (default 1s)
   --connect-timeout duration
-        Maximum total time to keep probing before giving up (default 10s)
+        Maximum total time to wait for a reachable target (default 10s)
   --fdpass
         Pass the connected socket to ssh instead of proxying traffic in-process
   --dry-run
@@ -101,6 +101,17 @@ Options:
   --help
         Print help and exit
 ```
+
+`--dry-run` takes precedence over `--fdpass`: it reports the selection and exits
+without passing a descriptor or relaying traffic. It reports only probe results
+available when selection finishes, so pending targets may be omitted. Help,
+diagnostics, and dry-run output go to stderr.
+
+Exit codes:
+
+- `0`: successful operation, including help or usage displayed with no arguments
+- `1`: runtime failure during selection, descriptor passing, or proxying
+- `2`: invalid command-line arguments
 
 ## Build
 
